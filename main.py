@@ -1,11 +1,15 @@
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+import time
 from contextlib import asynccontextmanager
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from sqlmodel import Session, select
 
-from app.database import create_db_and_tables
-from app.routers import usuarios, peliculas, favoritos
+from musica_api.config import get_settings, validate_settings
+from musica_api.database import create_db_and_tables, engine
+from musica_api.routers import usuarios, canciones, favoritos
 
-# TODO: Importar la configuración desde app.config
+settings = get_settings()
 
 
 @asynccontextmanager
@@ -14,79 +18,97 @@ async def lifespan(app: FastAPI):
     Gestor de ciclo de vida de la aplicación.
     Se ejecuta al iniciar y al cerrar la aplicación.
     """
-    # Startup: Crear tablas en la base de datos
+    validate_settings()
     create_db_and_tables()
     yield
-    
-    # Shutdown: Limpiar recursos si es necesario
-    print("cerrando aplicación...")
+    print("Cerrando aplicación...")
 
 
-# Crear la instancia de FastAPI con metadatos apropiados
-# Incluir: title, description, version, contact, license_info
+# Instancia principal de FastAPI
 app = FastAPI(
-    title="API de Películas",
-    description="API RESTful para gestionar usuarios, películas y favoritos",
-    version="1.0.0",
+    title=settings.app_name,
+    description="API RESTful para gestionar usuarios, canciones y favoritos",
+    version=settings.app_version,
     lifespan=lifespan,
-    # TODO: Agregar información de contacto y licencia
-
+    contact={
+        "name": "Juan Camilo Díaz",
+        "email": "juan@example.com",
+    },
+    license_info={
+        "name": "MIT",
+    },
 )
 
-
-# Configurar CORS para permitir solicitudes desde diferentes orígenes
-# Esto es importante para desarrollo con frontend separado
+# Configuración de CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # En producción, especificar orígenes permitidos
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
-# TODO: Incluir los routers de usuarios, canciones y favoritos
-# Ejemplo:
-# app.include_router(usuarios.router, prefix="/api/usuarios", tags=["Usuarios"])
+# Middleware opcional para logging de tiempos de respuesta
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start_time = time.time()
+    response = await call_next(request)
+    process_time = time.time() - start_time
+    response.headers["X-Process-Time"] = str(process_time)
+    return response
 
 
-# Crear un endpoint raíz que retorne información básica de la API
+# Manejador de errores personalizado
+@app.exception_handler(Exception)
+async def custom_global_exception_handler(request: Request, exc: Exception):
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Error interno del servidor", "error": str(exc)},
+    )
+
+
+# Inclusión de routers
+app.include_router(usuarios.router, prefix="/api/usuarios", tags=["Usuarios"])
+app.include_router(canciones.router, prefix="/api/canciones", tags=["Canciones"])
+app.include_router(favoritos.router, prefix="/api/favoritos", tags=["Favoritos"])
+
+
 @app.get("/", tags=["Root"])
 async def root():
-    """
-    Endpoint raíz de la API.
-    Retorna información básica y enlaces a la documentación.
-    """
+    """Endpoint raíz de la API."""
     return {
-        # TODO: Agregar información 
+        "message": f"Bienvenido a {settings.app_name}",
+        "version": settings.app_version,
+        "environment": settings.environment,
+        "docs": "/docs",
+        "redoc": "/redoc",
     }
 
 
-# Crear un endpoint de health check para monitoreo
 @app.get("/health", tags=["Health"])
 async def health_check():
-    """
-    Health check endpoint para verificar el estado de la API.
-    Útil para sistemas de monitoreo y orquestación.
-    """
+    """Health check endpoint para monitoreo."""
+    db_status = "ok"
+    try:
+        with Session(engine) as session:
+            session.exec(select(1))
+    except Exception:
+        db_status = "error"
+
     return {
-        "status": "healthy",
-        # TODO: Agregar verificación de conexión a base de datos
-        # TODO: Agregar información sobre el sistema (uptime, memoria, etc.)
+        "status": "healthy" if db_status == "ok" else "degraded",
+        "database": db_status,
+        "environment": settings.environment,
     }
-
-
-# TODO: Opcional - Agregar middleware para logging de requests
-
-
-# TODO: Opcional - Agregar manejadores de errores personalizados
 
 
 if __name__ == "__main__":
     import uvicorn
-    
+
     uvicorn.run(
-        # TODO: Configurar el servidor uvicorn con los parámetros apropiados
+        "main:app",
+        host=settings.host,
+        port=settings.port,
+        reload=settings.debug,
     )
-
-
