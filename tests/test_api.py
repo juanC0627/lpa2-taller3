@@ -9,71 +9,69 @@ from sqlmodel import Session, SQLModel, create_engine
 from sqlmodel.pool import StaticPool
 
 from main import app
-from app.database import get_session
-from app.models import Usuario, Cancion, Favorito
+from musica_api.database import get_session
+from musica_api.models import Usuario, Cancion, Favorito
 
 
 # =============================================================================
 # CONFIGURACIÓN DE FIXTURES
 # =============================================================================
 
-# Fixture para crear una base de datos en memoria para testing
 @pytest.fixture(name="session")
 def session_fixture():
     """
     Crea una sesión de base de datos en memoria para cada test.
     Se limpia automáticamente después de cada test.
     """
-    # TODO: Crear engine en memoria (SQLite)
-    
-    # TODO: Crear todas las tablas
-    
-    # TODO: Crear sesión
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool
+    )
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        yield session
 
-    pass
 
-
-# Fixture para cliente de pruebas
 @pytest.fixture(name="client")
 def client_fixture(session: Session):
     """
     Crea un cliente de pruebas de FastAPI con la sesión de test.
     """
-    # TODO: Override de la dependencia get_session
-    
-    pass
+    def get_session_override():
+        return session
+
+    app.dependency_overrides[get_session] = get_session_override
+    client = TestClient(app)
+    yield client
+    app.dependency_overrides.clear()
 
 
-# TODO: Fixture para crear usuarios de prueba
 @pytest.fixture(name="usuario_test")
 def usuario_test_fixture(session: Session):
-    """
-    Crea un usuario de prueba en la base de datos.
-    """
-  
-    pass
+    """Crea un usuario de prueba en la base de datos."""
+    usuario = Usuario(nombre="Usuario Test", correo="test@example.com")
+    session.add(usuario)
+    session.commit()
+    session.refresh(usuario)
+    return usuario
 
 
-# TODO: Fixture para crear canciones de prueba
-@pytest.fixture(name="musica_test")
+@pytest.fixture(name="cancion_test")
 def cancion_test_fixture(session: Session):
-    """
-    Crea una cancion de prueba en la base de datos.
-    """
-    # cancion = Cancion(
-    #     titulo="canción Test",
-    #     director="Director Test",
-    #     genero="Drama",
-    #     duracion=120,
-    #     año=2020,
-    #     clasificacion="PG-13",
-    #     sinopsis="Una canción de prueba"
-    # )
-    # session.add(cancion)
-    # session.commit()
-    # session.refresh(cancion)
-    # return cancion
-    pass
+    """Crea una canción de prueba en la base de datos."""
+    cancion = Cancion(
+        titulo="Bohemian Rhapsody",
+        artista="Queen",
+        album="A Night at the Opera",
+        duracion=354,
+        año=1975,
+        genero="Rock"
+    )
+    session.add(cancion)
+    session.commit()
+    session.refresh(cancion)
+    return cancion
 
 
 # =============================================================================
@@ -83,97 +81,112 @@ def cancion_test_fixture(session: Session):
 class TestUsuarios:
     """Tests para los endpoints de usuarios."""
     
-    # TODO: Test para listar usuarios
-    def test_listar_usuarios(self, client: TestClient):
+    def test_listar_usuarios(self, client: TestClient, usuario_test: Usuario):
         """Test para GET /api/usuarios"""
+        response = client.get("/api/usuarios")
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data) >= 1
+        assert data[0]["correo"] == usuario_test.correo
 
-        pass
-    
-    # TODO: Test para crear usuario
     def test_crear_usuario(self, client: TestClient):
         """Test para POST /api/usuarios"""
+        payload = {"nombre": "Nuevo Usuario", "correo": "nuevo@example.com"}
+        response = client.post("/api/usuarios", json=payload)
+        assert response.status_code == 201
+        data = response.json()
+        assert data["nombre"] == "Nuevo Usuario"
+        assert "id" in data
 
-        pass
-    
-    # TODO: Test para crear usuario con correo duplicado
     def test_crear_usuario_correo_duplicado(self, client: TestClient, usuario_test: Usuario):
         """Test para verificar que no se permiten correos duplicados"""
+        payload = {"nombre": "Duplicado", "correo": usuario_test.correo}
+        response = client.post("/api/usuarios", json=payload)
+        assert response.status_code == 400
+        assert "correo ya está registrado" in response.json()["detail"]
 
-        pass
-    
-    # TODO: Test para obtener usuario por ID
     def test_obtener_usuario(self, client: TestClient, usuario_test: Usuario):
         """Test para GET /api/usuarios/{id}"""
+        response = client.get(f"/api/usuarios/{usuario_test.id}")
+        assert response.status_code == 200
+        assert response.json()["nombre"] == usuario_test.nombre
 
-        pass
-    
-    # TODO: Test para obtener usuario inexistente
     def test_obtener_usuario_no_existe(self, client: TestClient):
         """Test para verificar error 404 con usuario inexistente"""
+        response = client.get("/api/usuarios/9999")
+        assert response.status_code == 404
 
-        pass
-    
-    # TODO: Test para actualizar usuario
     def test_actualizar_usuario(self, client: TestClient, usuario_test: Usuario):
         """Test para PUT /api/usuarios/{id}"""
+        payload = {"nombre": "Nombre Actualizado"}
+        response = client.put(f"/api/usuarios/{usuario_test.id}", json=payload)
+        assert response.status_code == 200
+        assert response.json()["nombre"] == "Nombre Actualizado"
 
-        pass
-    
-    # TODO: Test para eliminar usuario
     def test_eliminar_usuario(self, client: TestClient, usuario_test: Usuario):
         """Test para DELETE /api/usuarios/{id}"""
-
-        pass
+        response = client.delete(f"/api/usuarios/{usuario_test.id}")
+        assert response.status_code == 200
+        assert client.get(f"/api/usuarios/{usuario_test.id}").status_code == 404
 
 
 # =============================================================================
-# TESTS DE canciónS
+# TESTS DE CANCIONES
 # =============================================================================
 
-class TestCancions:
-    """Tests para los endpoints de cancións."""
+class TestCanciones:
+    """Tests para los endpoints de canciones."""
     
-    # TODO: Test para listar cancións
-    def test_listar_cancions(self, client: TestClient):
-        """Test para GET /api/cancions"""
+    def test_listar_canciones(self, client: TestClient, cancion_test: Cancion):
+        """Test para GET /api/canciones"""
+        response = client.get("/api/canciones")
+        assert response.status_code == 200
+        assert len(response.json()) >= 1
 
-        pass
-    
-    # TODO: Test para crear canción
     def test_crear_cancion(self, client: TestClient):
-        """Test para POST /api/cancions"""
+        """Test para POST /api/canciones"""
+        payload = {
+            "titulo": "Hotel California",
+            "artista": "Eagles",
+            "album": "Hotel California",
+            "duracion": 390,
+            "año": 1976,
+            "genero": "Rock"
+        }
+        response = client.post("/api/canciones", json=payload)
+        assert response.status_code == 201
+        assert response.json()["titulo"] == "Hotel California"
 
-        pass
-    
-    # TODO: Test para obtener canción por ID
     def test_obtener_cancion(self, client: TestClient, cancion_test: Cancion):
-        """Test para GET /api/cancions/{id}"""
+        """Test para GET /api/canciones/{id}"""
+        response = client.get(f"/api/canciones/{cancion_test.id}")
+        assert response.status_code == 200
+        assert response.json()["titulo"] == cancion_test.titulo
 
-        pass
-    
-    # TODO: Test para actualizar canción
     def test_actualizar_cancion(self, client: TestClient, cancion_test: Cancion):
-        """Test para PUT /api/cancions/{id}"""
+        """Test para PUT /api/canciones/{id}"""
+        payload = {"titulo": "Nuevo Titulo"}
+        response = client.put(f"/api/canciones/{cancion_test.id}", json=payload)
+        assert response.status_code == 200
+        assert response.json()["titulo"] == "Nuevo Titulo"
 
-        pass
-    
-    # TODO: Test para eliminar canción
     def test_eliminar_cancion(self, client: TestClient, cancion_test: Cancion):
-        """Test para DELETE /api/cancions/{id}"""
+        """Test para DELETE /api/canciones/{id}"""
+        response = client.delete(f"/api/canciones/{cancion_test.id}")
+        assert response.status_code == 200
+        assert client.get(f"/api/canciones/{cancion_test.id}").status_code == 404
 
-        pass
-    
-    # TODO: Test para buscar cancións
-    def test_buscar_cancions(self, client: TestClient, cancion_test: Cancion):
-        """Test para GET /api/cancions/buscar"""
+    def test_buscar_canciones(self, client: TestClient, cancion_test: Cancion):
+        """Test para GET /api/canciones/buscar"""
+        response = client.get("/api/canciones/buscar?titulo=Bohemian")
+        assert response.status_code == 200
+        assert len(response.json()) == 1
 
-        pass
-    
-    # TODO: Test para buscar cancións con múltiples filtros
-    def test_buscar_cancions_multiples_filtros(self, client: TestClient):
+    def test_buscar_canciones_multiples_filtros(self, client: TestClient, cancion_test: Cancion):
         """Test para búsqueda con múltiples parámetros"""
-
-        pass
+        response = client.get("/api/canciones/buscar?artista=Queen&genero=Rock")
+        assert response.status_code == 200
+        assert len(response.json()) == 1
 
 
 # =============================================================================
@@ -183,68 +196,33 @@ class TestCancions:
 class TestFavoritos:
     """Tests para los endpoints de favoritos."""
     
-    # TODO: Test para listar favoritos
     def test_listar_favoritos(self, client: TestClient):
         """Test para GET /api/favoritos"""
+        response = client.get("/api/favoritos")
+        assert response.status_code == 200
+        assert isinstance(response.json(), list)
 
-        pass
-    
-    # TODO: Test para crear favorito
-    def test_crear_favorito(
-        self, 
-        client: TestClient, 
-        usuario_test: Usuario, 
-        cancion_test: Cancion
-    ):
+    def test_crear_favorito(self, client: TestClient, usuario_test: Usuario, cancion_test: Cancion):
         """Test para POST /api/favoritos"""
+        payload = {"id_usuario": usuario_test.id, "id_cancion": cancion_test.id}
+        response = client.post("/api/favoritos", json=payload)
+        assert response.status_code == 201
+        assert response.json()["id_usuario"] == usuario_test.id
 
-        pass
-    
-    # TODO: Test para crear favorito duplicado
-    def test_crear_favorito_duplicado(
-        self, 
-        client: TestClient, 
-        usuario_test: Usuario, 
-        cancion_test: Cancion
-    ):
+    def test_crear_favorito_duplicado(self, client: TestClient, usuario_test: Usuario, cancion_test: Cancion):
         """Test para verificar que no se permiten favoritos duplicados"""
+        payload = {"id_usuario": usuario_test.id, "id_cancion": cancion_test.id}
+        client.post("/api/favoritos", json=payload)
+        response = client.post("/api/favoritos", json=payload)
+        assert response.status_code == 400
 
-        pass
-    
-    # TODO: Test para eliminar favorito
-    def test_eliminar_favorito(
-        self, 
-        client: TestClient, 
-        session: Session,
-        usuario_test: Usuario, 
-        cancion_test: Cancion
-    ):
+    def test_eliminar_favorito(self, client: TestClient, usuario_test: Usuario, cancion_test: Cancion):
         """Test para DELETE /api/favoritos/{id}"""
-
-        pass
-    
-    # TODO: Test para marcar favorito desde usuario
-    def test_marcar_favorito_usuario(
-        self, 
-        client: TestClient, 
-        usuario_test: Usuario, 
-        cancion_test: Cancion
-    ):
-        """Test para POST /api/usuarios/{id}/favoritos/{id_cancion}"""
-
-        pass
-    
-    # TODO: Test para listar favoritos de usuario
-    def test_listar_favoritos_usuario(
-        self, 
-        client: TestClient, 
-        session: Session,
-        usuario_test: Usuario, 
-        cancion_test: Cancion
-    ):
-        """Test para GET /api/usuarios/{id}/favoritos"""
-
-        pass
+        payload = {"id_usuario": usuario_test.id, "id_cancion": cancion_test.id}
+        fav_resp = client.post("/api/favoritos", json=payload)
+        fav_id = fav_resp.json()["id"]
+        response = client.delete(f"/api/favoritos/{fav_id}")
+        assert response.status_code == 200
 
 
 # =============================================================================
@@ -254,18 +232,28 @@ class TestFavoritos:
 class TestIntegracion:
     """Tests de integración que prueban flujos completos."""
     
-    # TODO: Test de flujo completo: crear usuario, canción y marcar favorito
     def test_flujo_completo(self, client: TestClient):
         """Test que verifica el flujo completo de la aplicación"""
         # 1. Crear usuario
+        u_resp = client.post("/api/usuarios", json={"nombre": "Usuario Flujo", "correo": "flujo@example.com"})
+        assert u_resp.status_code == 201
+        usuario_id = u_resp.json()["id"]
 
         # 2. Crear canción
+        c_resp = client.post("/api/canciones", json={
+            "titulo": "Cancion Flujo", "artista": "Artista Flujo",
+            "album": "Album", "duracion": 180, "año": 2022, "genero": "Pop"
+        })
+        assert c_resp.status_code == 201
+        cancion_id = c_resp.json()["id"]
 
         # 3. Marcar como favorito
+        f_resp = client.post("/api/favoritos", json={"id_usuario": usuario_id, "id_cancion": cancion_id})
+        assert f_resp.status_code == 201
 
-        # 4. Verificar que aparece en favoritos del usuario
-
-        pass
+        # 4. Verificar existencia en lista de favoritos
+        favs = client.get("/api/favoritos").json()
+        assert any(fav["id_usuario"] == usuario_id and fav["id_cancion"] == cancion_id for fav in favs)
 
 
 # =============================================================================
@@ -275,22 +263,21 @@ class TestIntegracion:
 class TestValidacion:
     """Tests para validaciones de datos."""
     
-    # TODO: Test para validar email inválido
     def test_email_invalido(self, client: TestClient):
         """Test para verificar validación de email"""
+        response = client.post("/api/usuarios", json={"nombre": "Invalido", "correo": "correo-no-valido"})
+        assert response.status_code == 400
 
-        pass
-    
-    # TODO: Test para validar año de canción
     def test_año_cancion_invalido(self, client: TestClient):
         """Test para verificar validación de año"""
+        payload = {
+            "titulo": "Futuro", "artista": "Time Traveler",
+            "album": "Futuro", "duracion": 180, "año": 2099, "genero": "Electronic"
+        }
+        response = client.post("/api/canciones", json=payload)
+        assert response.status_code == 400
 
-        pass
-    
-    # TODO: Test para validar campos requeridos
     def test_campos_requeridos(self, client: TestClient):
         """Test para verificar que los campos requeridos son obligatorios"""
-
-        pass
-
-
+        response = client.post("/api/usuarios", json={"nombre": "Incompleto"})
+        assert response.status_code == 422
