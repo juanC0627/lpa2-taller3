@@ -2,7 +2,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session, select
 from musica_api.database import get_session
-from musica_api.models import Usuario, UsuarioCreate, UsuarioUpdate
+from musica_api.models import Usuario, UsuarioCreate, UsuarioUpdate, Favorito, Cancion
 from utils import validar_correo
 
 router = APIRouter()
@@ -65,3 +65,60 @@ def eliminar_usuario(id: int, session: Session = Depends(get_session)):
     session.delete(usuario)
     session.commit()
     return {"ok": True, "message": "Usuario eliminado correctamente"}
+
+
+# =============================================================================
+# ENDPOINTS DE FAVORITOS POR USUARIO (Integración con Frontend Taller #4)
+# =============================================================================
+
+@router.get("/{id}/favoritos", response_model=List[Cancion])
+def listar_favoritos_usuario(id: int, session: Session = Depends(get_session)):
+    usuario = session.get(Usuario, id)
+    if not usuario:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    
+    query = (
+        select(Cancion)
+        .join(Favorito, Favorito.id_cancion == Cancion.id)
+        .where(Favorito.id_usuario == id)
+    )
+    return session.exec(query).all()
+
+
+@router.post("/{id_usuario}/favoritos/{id_cancion}", response_model=Favorito, status_code=201)
+def marcar_favorito_usuario(id_usuario: int, id_cancion: int, session: Session = Depends(get_session)):
+    if not session.get(Usuario, id_usuario):
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    if not session.get(Cancion, id_cancion):
+        raise HTTPException(status_code=404, detail="Canción no encontrada")
+
+    existente = session.exec(
+        select(Favorito).where(
+            Favorito.id_usuario == id_usuario,
+            Favorito.id_cancion == id_cancion
+        )
+    ).first()
+    if existente:
+        raise HTTPException(status_code=400, detail="La canción ya está en favoritos del usuario")
+
+    nuevo_favorito = Favorito(id_usuario=id_usuario, id_cancion=id_cancion)
+    session.add(nuevo_favorito)
+    session.commit()
+    session.refresh(nuevo_favorito)
+    return nuevo_favorito
+
+
+@router.delete("/{id_usuario}/favoritos/{id_cancion}")
+def eliminar_favorito_usuario(id_usuario: int, id_cancion: int, session: Session = Depends(get_session)):
+    favorito = session.exec(
+        select(Favorito).where(
+            Favorito.id_usuario == id_usuario,
+            Favorito.id_cancion == id_cancion
+        )
+    ).first()
+    if not favorito:
+        raise HTTPException(status_code=404, detail="Favorito no encontrado para este usuario")
+
+    session.delete(favorito)
+    session.commit()
+    return {"ok": True, "message": "Favorito eliminado del usuario"}
